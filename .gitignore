@@ -1,6 +1,6 @@
 .vscode
 *.txt
-*.json
+*.swp
 *.sqlite3*
 *.db
 tags
@@ -9,9 +9,13 @@ coverage.out
 issues/
 vendor/
 log/
-results/
-*config.toml
+results
+!integration/data/results
+config.toml
 !setup/docker/*
 .DS_Store
 dist/
 .idea
+vuls.*
+vuls
+!cmd/vuls

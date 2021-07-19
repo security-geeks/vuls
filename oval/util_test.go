@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/future-architect/vuls/config"
+	"github.com/future-architect/vuls/constant"
 	"github.com/future-architect/vuls/models"
 	ovalmodels "github.com/kotakanbe/goval-dictionary/models"
 )
@@ -209,6 +209,7 @@ func TestIsOvalDefAffected(t *testing.T) {
 		affected    bool
 		notFixedYet bool
 		fixedIn     string
+		wantErr     bool
 	}{
 		// 0. Ubuntu ovalpack.NotFixedYet == true
 		{
@@ -1030,7 +1031,7 @@ func TestIsOvalDefAffected(t *testing.T) {
 		// For kernel related packages, ignore OVAL with different major versions
 		{
 			in: in{
-				family: config.CentOS,
+				family: constant.CentOS,
 				def: ovalmodels.Definition{
 					AffectedPacks: []ovalmodels.Package{
 						{
@@ -1054,7 +1055,473 @@ func TestIsOvalDefAffected(t *testing.T) {
 		},
 		{
 			in: in{
-				family: config.CentOS,
+				family: constant.CentOS,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "kernel",
+							Version:     "3.1.0",
+							NotFixedYet: false,
+						},
+					},
+				},
+				req: request{
+					packName:          "kernel",
+					versionRelease:    "3.0.0",
+					newVersionRelease: "3.2.0",
+				},
+				kernel: models.Kernel{
+					Release: "3.0.0",
+				},
+			},
+			affected:    true,
+			notFixedYet: false,
+			fixedIn:     "3.1.0",
+		},
+		// Rocky Linux
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:          "b",
+					isSrcPack:         false,
+					versionRelease:    "0:1.2.3-45.el6.rocky.7",
+					newVersionRelease: "",
+				},
+			},
+			affected:    true,
+			notFixedYet: false,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.el6.rocky.8",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.el6.rocky.9",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:          "b",
+					isSrcPack:         false,
+					versionRelease:    "0:1.2.3-45.el6.rocky.6",
+					newVersionRelease: "0:1.2.3-45.el6.rocky.7",
+				},
+			},
+			affected:    true,
+			notFixedYet: true,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:          "b",
+					isSrcPack:         false,
+					versionRelease:    "0:1.2.3-45.el6.rocky.6",
+					newVersionRelease: "0:1.2.3-45.el6.rocky.8",
+				},
+			},
+			affected:    true,
+			notFixedYet: false,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:          "b",
+					isSrcPack:         false,
+					versionRelease:    "0:1.2.3-45.el6.rocky.6",
+					newVersionRelease: "0:1.2.3-45.el6.rocky.9",
+				},
+			},
+			affected:    true,
+			notFixedYet: false,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.el6.8",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.el6_7.8",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.sl6.7",
+				},
+			},
+			affected:    true,
+			notFixedYet: false,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.sl6.8",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.sl6.9",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:          "b",
+					isSrcPack:         false,
+					versionRelease:    "0:1.2.3-45.sl6.6",
+					newVersionRelease: "0:1.2.3-45.sl6.7",
+				},
+			},
+			affected:    true,
+			notFixedYet: true,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:          "b",
+					isSrcPack:         false,
+					versionRelease:    "0:1.2.3-45.sl6.6",
+					newVersionRelease: "0:1.2.3-45.sl6.8",
+				},
+			},
+			affected:    true,
+			notFixedYet: false,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:          "b",
+					isSrcPack:         false,
+					versionRelease:    "0:1.2.3-45.sl6.6",
+					newVersionRelease: "0:1.2.3-45.sl6.9",
+				},
+			},
+			affected:    true,
+			notFixedYet: false,
+			fixedIn:     "0:1.2.3-45.el6_7.8",
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6_7.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.el6.8",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: "rocky",
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "a",
+							NotFixedYet: false,
+						},
+						{
+							Name:        "b",
+							NotFixedYet: false,
+							Version:     "0:1.2.3-45.el6.8",
+						},
+					},
+				},
+				req: request{
+					packName:       "b",
+					isSrcPack:      false,
+					versionRelease: "0:1.2.3-45.el6_7.8",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		// For kernel related packages, ignore OVAL with different major versions
+		{
+			in: in{
+				family: constant.Rocky,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:        "kernel",
+							Version:     "4.1.0",
+							NotFixedYet: false,
+						},
+					},
+				},
+				req: request{
+					packName:          "kernel",
+					versionRelease:    "3.0.0",
+					newVersionRelease: "3.2.0",
+				},
+				kernel: models.Kernel{
+					Release: "3.0.0",
+				},
+			},
+			affected:    false,
+			notFixedYet: false,
+		},
+		{
+			in: in{
+				family: constant.Rocky,
 				def: ovalmodels.Definition{
 					AffectedPacks: []ovalmodels.Package{
 						{
@@ -1080,7 +1547,7 @@ func TestIsOvalDefAffected(t *testing.T) {
 		// dnf module
 		{
 			in: in{
-				family: config.RedHat,
+				family: constant.RedHat,
 				def: ovalmodels.Definition{
 					AffectedPacks: []ovalmodels.Package{
 						{
@@ -1106,7 +1573,7 @@ func TestIsOvalDefAffected(t *testing.T) {
 		// dnf module 2
 		{
 			in: in{
-				family: config.RedHat,
+				family: constant.RedHat,
 				def: ovalmodels.Definition{
 					AffectedPacks: []ovalmodels.Package{
 						{
@@ -1131,7 +1598,7 @@ func TestIsOvalDefAffected(t *testing.T) {
 		// dnf module 3
 		{
 			in: in{
-				family: config.RedHat,
+				family: constant.RedHat,
 				def: ovalmodels.Definition{
 					AffectedPacks: []ovalmodels.Package{
 						{
@@ -1153,9 +1620,166 @@ func TestIsOvalDefAffected(t *testing.T) {
 			affected:    false,
 			notFixedYet: false,
 		},
+		// .ksplice1.
+		{
+			in: in{
+				family: constant.Oracle,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:    "nginx",
+							Version: "2:2.17-106.0.1.ksplice1.el7_2.4",
+							Arch:    "x86_64",
+						},
+					},
+				},
+				req: request{
+					packName:       "nginx",
+					versionRelease: "2:2.17-107",
+					arch:           "x86_64",
+				},
+			},
+			affected: false,
+		},
+		// .ksplice1.
+		{
+			in: in{
+				family: constant.Oracle,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:    "nginx",
+							Version: "2:2.17-106.0.1.ksplice1.el7_2.4",
+							Arch:    "x86_64",
+						},
+					},
+				},
+				req: request{
+					packName:       "nginx",
+					versionRelease: "2:2.17-105.0.1.ksplice1.el7_2.4",
+					arch:           "x86_64",
+				},
+			},
+			affected: true,
+			fixedIn:  "2:2.17-106.0.1.ksplice1.el7_2.4",
+		},
+		// same arch
+		{
+			in: in{
+				family: constant.Oracle,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:    "nginx",
+							Version: "2.17-106.0.1",
+							Arch:    "x86_64",
+						},
+					},
+				},
+				req: request{
+					packName:       "nginx",
+					versionRelease: "2.17-105.0.1",
+					arch:           "x86_64",
+				},
+			},
+			affected: true,
+			fixedIn:  "2.17-106.0.1",
+		},
+		// different arch
+		{
+			in: in{
+				family: constant.Oracle,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:    "nginx",
+							Version: "2.17-106.0.1",
+							Arch:    "aarch64",
+						},
+					},
+				},
+				req: request{
+					packName:       "nginx",
+					versionRelease: "2.17-105.0.1",
+					arch:           "x86_64",
+				},
+			},
+			affected: false,
+			fixedIn:  "",
+		},
+		// Arch for RHEL, CentOS is ""
+		{
+			in: in{
+				family: constant.RedHat,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:    "nginx",
+							Version: "2.17-106.0.1",
+							Arch:    "",
+						},
+					},
+				},
+				req: request{
+					packName:       "nginx",
+					versionRelease: "2.17-105.0.1",
+					arch:           "x86_64",
+				},
+			},
+			affected: true,
+			fixedIn:  "2.17-106.0.1",
+		},
+		// arch is empty for Oracle, Amazon linux
+		{
+			in: in{
+				family: constant.Oracle,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:    "nginx",
+							Version: "2.17-106.0.1",
+							Arch:    "",
+						},
+					},
+				},
+				req: request{
+					packName:       "nginx",
+					versionRelease: "2.17-105.0.1",
+					arch:           "x86_64",
+				},
+			},
+			wantErr: false,
+			fixedIn: "",
+		},
+		// arch is empty for Oracle, Amazon linux
+		{
+			in: in{
+				family: constant.Amazon,
+				def: ovalmodels.Definition{
+					AffectedPacks: []ovalmodels.Package{
+						{
+							Name:    "nginx",
+							Version: "2.17-106.0.1",
+							Arch:    "",
+						},
+					},
+				},
+				req: request{
+					packName:       "nginx",
+					versionRelease: "2.17-105.0.1",
+					arch:           "x86_64",
+				},
+			},
+			wantErr: false,
+			fixedIn: "",
+		},
 	}
+
 	for i, tt := range tests {
-		affected, notFixedYet, fixedIn := isOvalDefAffected(tt.in.def, tt.in.req, tt.in.family, tt.in.kernel, tt.in.mods)
+		affected, notFixedYet, fixedIn, err := isOvalDefAffected(tt.in.def, tt.in.req, tt.in.family, tt.in.kernel, tt.in.mods)
+		if tt.wantErr != (err != nil) {
+			t.Errorf("[%d] err\nexpected: %t\n  actual: %s\n", i, tt.wantErr, err)
+		}
 		if tt.affected != affected {
 			t.Errorf("[%d] affected\nexpected: %v\n  actual: %v\n", i, tt.affected, affected)
 		}
@@ -1168,7 +1792,7 @@ func TestIsOvalDefAffected(t *testing.T) {
 	}
 }
 
-func Test_centOSVersionToRHEL(t *testing.T) {
+func Test_rhelDownStreamOSVersionToRHEL(t *testing.T) {
 	type args struct {
 		ver string
 	}
@@ -1183,6 +1807,13 @@ func Test_centOSVersionToRHEL(t *testing.T) {
 				ver: "grub2-tools-2.02-0.80.el7.centos.x86_64",
 			},
 			want: "grub2-tools-2.02-0.80.el7.x86_64",
+		},
+		{
+			name: "remove rocky.",
+			args: args{
+				ver: "platform-python-3.6.8-37.el8.rocky.x86_64",
+			},
+			want: "platform-python-3.6.8-37.el8.x86_64",
 		},
 		{
 			name: "noop",
@@ -1201,8 +1832,8 @@ func Test_centOSVersionToRHEL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := centOSVersionToRHEL(tt.args.ver); got != tt.want {
-				t.Errorf("centOSVersionToRHEL() = %v, want %v", got, tt.want)
+			if got := rhelDownStreamOSVersionToRHEL(tt.args.ver); got != tt.want {
+				t.Errorf("rhelDownStreamOSVersionToRHEL() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -1277,6 +1908,60 @@ func Test_lessThan(t *testing.T) {
 			got, _ := lessThan(tt.args.family, tt.args.newVer, tt.args.AffectedPacks)
 			if got != tt.want {
 				t.Errorf("lessThan() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_ovalResult_Sort(t *testing.T) {
+	type fields struct {
+		entries []defPacks
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   fields
+	}{
+		{
+			name: "already sorted",
+			fields: fields{
+				entries: []defPacks{
+					{def: ovalmodels.Definition{DefinitionID: "0"}},
+					{def: ovalmodels.Definition{DefinitionID: "1"}},
+				},
+			},
+			want: fields{
+				entries: []defPacks{
+					{def: ovalmodels.Definition{DefinitionID: "0"}},
+					{def: ovalmodels.Definition{DefinitionID: "1"}},
+				},
+			},
+		},
+		{
+			name: "sort",
+			fields: fields{
+				entries: []defPacks{
+					{def: ovalmodels.Definition{DefinitionID: "1"}},
+					{def: ovalmodels.Definition{DefinitionID: "0"}},
+				},
+			},
+			want: fields{
+				entries: []defPacks{
+					{def: ovalmodels.Definition{DefinitionID: "0"}},
+					{def: ovalmodels.Definition{DefinitionID: "1"}},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := &ovalResult{
+				entries: tt.fields.entries,
+			}
+			o.Sort()
+
+			if !reflect.DeepEqual(o.entries, tt.want.entries) {
+				t.Errorf("act %#v, want %#v", o.entries, tt.want.entries)
 			}
 		})
 	}

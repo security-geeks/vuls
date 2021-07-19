@@ -3,12 +3,12 @@ package config
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 
 	"github.com/asaskevich/govalidator"
-	log "github.com/sirupsen/logrus"
+	"github.com/future-architect/vuls/constant"
+	"github.com/future-architect/vuls/logging"
 	"golang.org/x/xerrors"
 )
 
@@ -23,99 +23,80 @@ var Conf Config
 
 //Config is struct of Configuration
 type Config struct {
-	Debug      bool   `json:"debug,omitempty"`
-	DebugSQL   bool   `json:"debugSQL,omitempty"`
-	Lang       string `json:"lang,omitempty"`
+	logging.LogOpts
+
+	// scan, report
 	HTTPProxy  string `valid:"url" json:"httpProxy,omitempty"`
-	LogDir     string `json:"logDir,omitempty"`
 	ResultsDir string `json:"resultsDir,omitempty"`
 	Pipe       bool   `json:"pipe,omitempty"`
-	Quiet      bool   `json:"quiet,omitempty"`
-	NoProgress bool   `json:"noProgress,omitempty"`
-	SSHNative  bool   `json:"sshNative,omitempty"`
-	Vvv        bool   `json:"vvv,omitempty"`
 
-	Default       ServerInfo            `json:"default,omitempty"`
-	Servers       map[string]ServerInfo `json:"servers,omitempty"`
-	CvssScoreOver float64               `json:"cvssScoreOver,omitempty"`
+	Default ServerInfo            `json:"default,omitempty"`
+	Servers map[string]ServerInfo `json:"servers,omitempty"`
 
-	IgnoreUnscoredCves    bool `json:"ignoreUnscoredCves,omitempty"`
-	IgnoreUnfixed         bool `json:"ignoreUnfixed,omitempty"`
-	IgnoreGitHubDismissed bool `json:"ignore_git_hub_dismissed,omitempty"`
+	ScanOpts
 
-	CacheDBPath     string `json:"cacheDBPath,omitempty"`
-	TrivyCacheDBDir string `json:"trivyCacheDBDir,omitempty"`
-
+	// report
 	CveDict    GoCveDictConf  `json:"cveDict,omitempty"`
 	OvalDict   GovalDictConf  `json:"ovalDict,omitempty"`
 	Gost       GostConf       `json:"gost,omitempty"`
 	Exploit    ExploitConf    `json:"exploit,omitempty"`
 	Metasploit MetasploitConf `json:"metasploit,omitempty"`
 
-	Slack    SlackConf    `json:"-"`
-	EMail    SMTPConf     `json:"-"`
-	HTTP     HTTPConf     `json:"-"`
-	Syslog   SyslogConf   `json:"-"`
-	AWS      AWSConf      `json:"-"`
-	Azure    AzureConf    `json:"-"`
-	ChatWork ChatWorkConf `json:"-"`
-	Telegram TelegramConf `json:"-"`
+	Slack      SlackConf      `json:"-"`
+	EMail      SMTPConf       `json:"-"`
+	HTTP       HTTPConf       `json:"-"`
+	Syslog     SyslogConf     `json:"-"`
+	AWS        AWSConf        `json:"-"`
+	Azure      AzureConf      `json:"-"`
+	ChatWork   ChatWorkConf   `json:"-"`
+	GoogleChat GoogleChatConf `json:"-"`
+	Telegram   TelegramConf   `json:"-"`
+	WpScan     WpScanConf     `json:"-"`
+	Saas       SaasConf       `json:"-"`
 
-	WpScan WpScanConf `json:"WpScan,omitempty"`
+	ReportOpts
+}
 
-	Saas      SaasConf `json:"-"`
-	DetectIPS bool     `json:"detectIps,omitempty"`
+// ReportConf is an interface to Validate Report Config
+type ReportConf interface {
+	Validate() []error
+}
 
-	RefreshCve        bool `json:"refreshCve,omitempty"`
-	ToSlack           bool `json:"toSlack,omitempty"`
-	ToChatWork        bool `json:"toChatWork,omitempty"`
-	ToTelegram        bool `json:"ToTelegram,omitempty"`
-	ToEmail           bool `json:"toEmail,omitempty"`
-	ToSyslog          bool `json:"toSyslog,omitempty"`
-	ToLocalFile       bool `json:"toLocalFile,omitempty"`
-	ToS3              bool `json:"toS3,omitempty"`
-	ToAzureBlob       bool `json:"toAzureBlob,omitempty"`
-	ToHTTP            bool `json:"toHTTP,omitempty"`
-	FormatJSON        bool `json:"formatJSON,omitempty"`
-	FormatOneEMail    bool `json:"formatOneEMail,omitempty"`
-	FormatOneLineText bool `json:"formatOneLineText,omitempty"`
-	FormatList        bool `json:"formatList,omitempty"`
-	FormatFullText    bool `json:"formatFullText,omitempty"`
-	FormatCsvList     bool `json:"formatCsvList,omitempty"`
-	GZIP              bool `json:"gzip,omitempty"`
-	DiffPlus          bool `json:"diffPlus,omitempty"`
-	DiffMinus         bool `json:"diffMinus,omitempty"`
-	Diff              bool `json:"diff,omitempty"`
+// ScanOpts is options for scan
+type ScanOpts struct {
+	Vvv bool `json:"vvv,omitempty"`
+}
+
+// ReportOpts is options for report
+type ReportOpts struct {
+	// refactored
+	CvssScoreOver      float64 `json:"cvssScoreOver,omitempty"`
+	TrivyCacheDBDir    string  `json:"trivyCacheDBDir,omitempty"`
+	NoProgress         bool    `json:"noProgress,omitempty"`
+	RefreshCve         bool    `json:"refreshCve,omitempty"`
+	IgnoreUnfixed      bool    `json:"ignoreUnfixed,omitempty"`
+	IgnoreUnscoredCves bool    `json:"ignoreUnscoredCves,omitempty"`
+	DiffPlus           bool    `json:"diffPlus,omitempty"`
+	DiffMinus          bool    `json:"diffMinus,omitempty"`
+	Diff               bool    `json:"diff,omitempty"`
+	Lang               string  `json:"lang,omitempty"`
 }
 
 // ValidateOnConfigtest validates
 func (c Config) ValidateOnConfigtest() bool {
 	errs := c.checkSSHKeyExist()
-
-	if runtime.GOOS == "windows" && !c.SSHNative {
-		errs = append(errs, xerrors.New("-ssh-native-insecure is needed on windows"))
-	}
-
-	_, err := govalidator.ValidateStruct(c)
-	if err != nil {
+	if _, err := govalidator.ValidateStruct(c); err != nil {
 		errs = append(errs, err)
 	}
-
 	for _, err := range errs {
-		log.Error(err)
+		logging.Log.Error(err)
 	}
-
 	return len(errs) == 0
 }
 
 // ValidateOnScan validates configuration
 func (c Config) ValidateOnScan() bool {
 	errs := c.checkSSHKeyExist()
-
-	if runtime.GOOS == "windows" && !c.SSHNative {
-		errs = append(errs, xerrors.New("-ssh-native-insecure is needed on windows"))
-	}
-
 	if len(c.ResultsDir) != 0 {
 		if ok, _ := govalidator.IsFilePath(c.ResultsDir); !ok {
 			errs = append(errs, xerrors.Errorf(
@@ -123,29 +104,28 @@ func (c Config) ValidateOnScan() bool {
 		}
 	}
 
-	if len(c.CacheDBPath) != 0 {
-		if ok, _ := govalidator.IsFilePath(c.CacheDBPath); !ok {
-			errs = append(errs, xerrors.Errorf(
-				"Cache DB path must be a *Absolute* file path. -cache-dbpath: %s",
-				c.CacheDBPath))
-		}
-	}
-
-	_, err := govalidator.ValidateStruct(c)
-	if err != nil {
+	if _, err := govalidator.ValidateStruct(c); err != nil {
 		errs = append(errs, err)
 	}
 
-	for _, err := range errs {
-		log.Error(err)
+	for _, server := range c.Servers {
+		if !server.Module.IsScanPort() {
+			continue
+		}
+		if es := server.PortScan.Validate(); 0 < len(es) {
+			errs = append(errs, es...)
+		}
 	}
 
+	for _, err := range errs {
+		logging.Log.Error(err)
+	}
 	return len(errs) == 0
 }
 
 func (c Config) checkSSHKeyExist() (errs []error) {
 	for serverName, v := range c.Servers {
-		if v.Type == ServerTypePseudo {
+		if v.Type == constant.ServerTypePseudo {
 			continue
 		}
 		if v.KeyPath != "" {
@@ -158,39 +138,8 @@ func (c Config) checkSSHKeyExist() (errs []error) {
 	return errs
 }
 
-// ValidateOnReportDB validates configuration
-func (c Config) ValidateOnReportDB() bool {
-	errs := []error{}
-
-	if err := validateDB("cvedb", c.CveDict.Type, c.CveDict.SQLite3Path, c.CveDict.URL); err != nil {
-		errs = append(errs, err)
-	}
-
-	if err := validateDB("ovaldb", c.OvalDict.Type, c.OvalDict.SQLite3Path, c.OvalDict.URL); err != nil {
-		errs = append(errs, err)
-	}
-
-	if err := validateDB("gostdb", c.Gost.Type, c.Gost.SQLite3Path, c.Gost.URL); err != nil {
-		errs = append(errs, err)
-	}
-
-	if err := validateDB("exploitdb", c.Exploit.Type, c.Exploit.SQLite3Path, c.Exploit.URL); err != nil {
-		errs = append(errs, err)
-	}
-
-	if err := validateDB("msfdb", c.Metasploit.Type, c.Metasploit.SQLite3Path, c.Metasploit.URL); err != nil {
-		errs = append(errs, err)
-	}
-
-	for _, err := range errs {
-		log.Error(err)
-	}
-
-	return len(errs) == 0
-}
-
 // ValidateOnReport validates configuration
-func (c Config) ValidateOnReport() bool {
+func (c *Config) ValidateOnReport() bool {
 	errs := []error{}
 
 	if len(c.ResultsDir) != 0 {
@@ -205,54 +154,39 @@ func (c Config) ValidateOnReport() bool {
 		errs = append(errs, err)
 	}
 
-	if mailerrs := c.EMail.Validate(); 0 < len(mailerrs) {
-		errs = append(errs, mailerrs...)
-	}
-
-	if slackerrs := c.Slack.Validate(); 0 < len(slackerrs) {
-		errs = append(errs, slackerrs...)
-	}
-
-	if chatworkerrs := c.ChatWork.Validate(); 0 < len(chatworkerrs) {
-		errs = append(errs, chatworkerrs...)
-	}
-
-	if telegramerrs := c.Telegram.Validate(); 0 < len(telegramerrs) {
-		errs = append(errs, telegramerrs...)
-	}
-
-	if syslogerrs := c.Syslog.Validate(); 0 < len(syslogerrs) {
-		errs = append(errs, syslogerrs...)
-	}
-
-	if httperrs := c.HTTP.Validate(); 0 < len(httperrs) {
-		errs = append(errs, httperrs...)
-	}
-
-	for _, err := range errs {
-		log.Error(err)
-	}
-
-	return len(errs) == 0
-}
-
-// ValidateOnTui validates configuration
-func (c Config) ValidateOnTui() bool {
-	errs := []error{}
-
-	if len(c.ResultsDir) != 0 {
-		if ok, _ := govalidator.IsFilePath(c.ResultsDir); !ok {
-			errs = append(errs, xerrors.Errorf(
-				"JSON base directory must be a *Absolute* file path. -results-dir: %s", c.ResultsDir))
+	for _, rc := range []ReportConf{
+		&c.EMail,
+		&c.Slack,
+		&c.ChatWork,
+		&c.GoogleChat,
+		&c.Telegram,
+		&c.Syslog,
+		&c.HTTP,
+		&c.AWS,
+		&c.Azure,
+	} {
+		if es := rc.Validate(); 0 < len(es) {
+			errs = append(errs, es...)
 		}
 	}
 
-	if err := validateDB("cvedb", c.CveDict.Type, c.CveDict.SQLite3Path, c.CveDict.URL); err != nil {
-		errs = append(errs, err)
+	for _, cnf := range []VulnDictInterface{
+		&Conf.CveDict,
+		&Conf.OvalDict,
+		&Conf.Gost,
+		&Conf.Exploit,
+		&Conf.Metasploit,
+	} {
+		if err := cnf.Validate(); err != nil {
+			errs = append(errs, xerrors.Errorf("Failed to validate %s: %+v", cnf.GetName(), err))
+		}
+		if err := cnf.CheckHTTPHealth(); err != nil {
+			errs = append(errs, xerrors.Errorf("Run %s as server mode before reporting: %+v", cnf.GetName(), err))
+		}
 	}
 
 	for _, err := range errs {
-		log.Error(err)
+		logging.Log.Error(err)
 	}
 
 	return len(errs) == 0
@@ -262,81 +196,9 @@ func (c Config) ValidateOnTui() bool {
 func (c Config) ValidateOnSaaS() bool {
 	saaserrs := c.Saas.Validate()
 	for _, err := range saaserrs {
-		log.Error("Failed to validate SaaS conf: %+w", err)
+		logging.Log.Error("Failed to validate SaaS conf: %+w", err)
 	}
 	return len(saaserrs) == 0
-}
-
-// validateDB validates configuration
-func validateDB(dictionaryDBName, dbType, dbPath, dbURL string) error {
-	log.Infof("-%s-type: %s, -%s-url: %s, -%s-path: %s",
-		dictionaryDBName, dbType, dictionaryDBName, dbURL, dictionaryDBName, dbPath)
-
-	switch dbType {
-	case "sqlite3":
-		if dbURL != "" {
-			return xerrors.Errorf("To use SQLite3, specify -%s-type=sqlite3 and -%s-path. To use as http server mode, specify -%s-type=http and -%s-url",
-				dictionaryDBName, dictionaryDBName, dictionaryDBName, dictionaryDBName)
-		}
-		if ok, _ := govalidator.IsFilePath(dbPath); !ok {
-			return xerrors.Errorf("SQLite3 path must be a *Absolute* file path. -%s-path: %s",
-				dictionaryDBName, dbPath)
-		}
-	case "mysql":
-		if dbURL == "" {
-			return xerrors.Errorf(`MySQL connection string is needed. -%s-url="user:pass@tcp(localhost:3306)/dbname"`,
-				dictionaryDBName)
-		}
-	case "postgres":
-		if dbURL == "" {
-			return xerrors.Errorf(`PostgreSQL connection string is needed. -%s-url="host=myhost user=user dbname=dbname sslmode=disable password=password"`,
-				dictionaryDBName)
-		}
-	case "redis":
-		if dbURL == "" {
-			return xerrors.Errorf(`Redis connection string is needed. -%s-url="redis://localhost/0"`,
-				dictionaryDBName)
-		}
-	case "http":
-		if dbURL == "" {
-			return xerrors.Errorf(`URL is needed. -%s-url="http://localhost:1323"`,
-				dictionaryDBName)
-		}
-	default:
-		return xerrors.Errorf("%s type must be either 'sqlite3', 'mysql', 'postgres', 'redis' or 'http'.  -%s-type: %s",
-			dictionaryDBName, dictionaryDBName, dbType)
-	}
-	return nil
-}
-
-// AWSConf is aws config
-type AWSConf struct {
-	// AWS profile to use
-	Profile string `json:"profile"`
-
-	// AWS region to use
-	Region string `json:"region"`
-
-	// S3 bucket name
-	S3Bucket string `json:"s3Bucket"`
-
-	// /bucket/path/to/results
-	S3ResultsDir string `json:"s3ResultsDir"`
-
-	// The Server-side encryption algorithm used when storing the reports in S3 (e.g., AES256, aws:kms).
-	S3ServerSideEncryption string `json:"s3ServerSideEncryption"`
-}
-
-// AzureConf is azure config
-type AzureConf struct {
-	// Azure account name to use. AZURE_STORAGE_ACCOUNT environment variable is used if not specified
-	AccountName string `json:"accountName"`
-
-	// Azure account key to use. AZURE_STORAGE_ACCESS_KEY environment variable is used if not specified
-	AccountKey string `json:"-"`
-
-	// Azure storage container name
-	ContainerName string `json:"containerName"`
 }
 
 // WpScanConf is wpscan.com config
@@ -354,7 +216,6 @@ type ServerInfo struct {
 	Port               string                      `toml:"port,omitempty" json:"port,omitempty"`
 	SSHConfigPath      string                      `toml:"sshConfigPath,omitempty" json:"sshConfigPath,omitempty"`
 	KeyPath            string                      `toml:"keyPath,omitempty" json:"keyPath,omitempty"`
-	KeyPassword        string                      `json:"-" toml:"-"`
 	CpeNames           []string                    `toml:"cpeNames,omitempty" json:"cpeNames,omitempty"`
 	ScanMode           []string                    `toml:"scanMode,omitempty" json:"scanMode,omitempty"`
 	ScanModules        []string                    `toml:"scanModules,omitempty" json:"scanModules,omitempty"`
@@ -369,7 +230,7 @@ type ServerInfo struct {
 	GitHubRepos        map[string]GitHubConf       `toml:"githubs" json:"githubs,omitempty"` // key: owner/repo
 	UUIDs              map[string]string           `toml:"uuids,omitempty" json:"uuids,omitempty"`
 	Memo               string                      `toml:"memo,omitempty" json:"memo,omitempty"`
-	Enablerepo         []string                    `toml:"enablerepo,omitempty" json:"enablerepo,omitempty"` // For CentOS, RHEL, Amazon
+	Enablerepo         []string                    `toml:"enablerepo,omitempty" json:"enablerepo,omitempty"` // For CentOS, Rocky, RHEL, Amazon
 	Optional           map[string]interface{}      `toml:"optional,omitempty" json:"optional,omitempty"`     // Optional key-value set that will be outputted to JSON
 	Lockfiles          []string                    `toml:"lockfiles,omitempty" json:"lockfiles,omitempty"`   // ie) path/to/package-lock.json
 	FindLock           bool                        `toml:"findLock,omitempty" json:"findLock,omitempty"`
@@ -377,8 +238,9 @@ type ServerInfo struct {
 	IgnoredJSONKeys    []string                    `toml:"ignoredJSONKeys,omitempty" json:"ignoredJSONKeys,omitempty"`
 	IPv4Addrs          []string                    `toml:"-" json:"ipv4Addrs,omitempty"`
 	IPv6Addrs          []string                    `toml:"-" json:"ipv6Addrs,omitempty"`
-	IPSIdentifiers     map[IPS]string              `toml:"-" json:"ipsIdentifiers,omitempty"`
+	IPSIdentifiers     map[string]string           `toml:"-" json:"ipsIdentifiers,omitempty"`
 	WordPress          *WordPressConf              `toml:"wordpress,omitempty" json:"wordpress,omitempty"`
+	PortScan           *PortScanConf               `toml:"portscan,omitempty" json:"portscan,omitempty"`
 
 	// internal use
 	LogMsgAnsiColor string     `toml:"-" json:"-"` // DebugLog Color
@@ -410,7 +272,8 @@ func (cnf WordPressConf) IsZero() bool {
 
 // GitHubConf is used for GitHub Security Alerts
 type GitHubConf struct {
-	Token string `json:"-"`
+	Token                 string `json:"-"`
+	IgnoreGitHubDismissed bool   `json:"ignoreGitHubDismissed,omitempty"`
 }
 
 // GetServerName returns ServerName if this serverInfo is about host.
@@ -434,7 +297,7 @@ func (l Distro) String() string {
 
 // MajorVersion returns Major version
 func (l Distro) MajorVersion() (int, error) {
-	if l.Family == Amazon {
+	if l.Family == constant.Amazon {
 		if isAmazonLinux1(l.Release) {
 			return 1, nil
 		}
@@ -461,9 +324,4 @@ type Container struct {
 	ContainerID string
 	Name        string
 	Image       string
-}
-
-// VulnSrcConf is an interface of vulnsrc
-type VulnSrcConf interface {
-	CheckHTTPHealth() error
 }

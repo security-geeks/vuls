@@ -8,10 +8,11 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/future-architect/vuls/config"
+	"github.com/future-architect/vuls/logging"
 	"github.com/google/subcommands"
 
 	ps "github.com/kotakanbe/go-pingscanner"
-	"github.com/sirupsen/logrus"
 )
 
 // DiscoverCmd is Subcommand of host discovery mode
@@ -38,9 +39,11 @@ func (p *DiscoverCmd) SetFlags(f *flag.FlagSet) {
 
 // Execute execute
 func (p *DiscoverCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+	logging.Log = logging.NewCustomLogger(false, false, false, config.Conf.LogDir, "", "")
+	logging.Log.Infof("vuls-%s-%s", config.Version, config.Revision)
 	// validate
 	if len(f.Args()) == 0 {
-		logrus.Errorf("Usage: " + p.Usage())
+		logging.Log.Errorf("Usage: " + p.Usage())
 		return subcommands.ExitUsageError
 	}
 
@@ -55,15 +58,15 @@ func (p *DiscoverCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface
 		hosts, err := scanner.Scan()
 
 		if err != nil {
-			logrus.Errorf("Host Discovery failed. err: %s", err)
+			logging.Log.Errorf("Host Discovery failed. err: %+v", err)
 			return subcommands.ExitFailure
 		}
 
 		if len(hosts) < 1 {
-			logrus.Errorf("Active hosts not found in %s", cidr)
+			logging.Log.Errorf("Active hosts not found in %s", cidr)
 			return subcommands.ExitSuccess
 		} else if err := printConfigToml(hosts); err != nil {
-			logrus.Errorf("Failed to parse template. err: %s", err)
+			logging.Log.Errorf("Failed to parse template. err: %+v", err)
 			return subcommands.ExitFailure
 		}
 	}
@@ -154,6 +157,13 @@ func printConfigToml(ips []string) (err error) {
 #room     = "xxxxxxxxxxx"
 #apiToken = "xxxxxxxxxxxxxxxxxx"
 
+# https://vuls.io/docs/en/config.toml.html#googlechat-section
+#[googlechat]
+#webHookURL = "https://chat.googleapis.com/v1/spaces/xxxxxxxxxx/messages?key=yyyyyyyyyy&token=zzzzzzzzzz%3D"
+#skipIfNoCve = false
+#serverNameRegexp = "^(\\[Reboot Required\\] )?((spam|ham).*|.*(egg)$)" # include spamonigiri, hamburger, boiledegg
+#serverNameRegexp = "^(\\[Reboot Required\\] )?(?:(spam|ham).*|.*(?:egg)$)" # exclude spamonigiri, hamburger, boiledegg
+
 # https://vuls.io/docs/en/config.toml.html#telegram-section
 #[telegram]
 #chatID     = "xxxxxxxxxxx"
@@ -208,12 +218,19 @@ host                = "{{$ip}}"
 #ignoreCves     = ["CVE-2014-0160"]
 
 #[servers.{{index $names $i}}.githubs."owner/repo"]
-#token   = "yourToken"
+#token	= "yourToken"
+#ignoreGitHubDismissed	= false
 
 #[servers.{{index $names $i}}.wordpress]
 #cmdPath = "/usr/local/bin/wp"
 #osUser = "wordpress"
 #docRoot = "/path/to/DocumentRoot/"
+
+#[servers.{{index $names $i}}.portscan]
+#scannerBinPath = "/usr/bin/nmap"
+#hasPrivileged = true
+#scanTechniques = ["sS"]
+#sourcePort = "65535"
 
 #[servers.{{index $names $i}}.optional]
 #key = "value1"

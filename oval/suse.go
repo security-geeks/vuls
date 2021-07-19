@@ -4,9 +4,9 @@ package oval
 
 import (
 	"github.com/future-architect/vuls/config"
+	"github.com/future-architect/vuls/constant"
+	"github.com/future-architect/vuls/logging"
 	"github.com/future-architect/vuls/models"
-	"github.com/future-architect/vuls/util"
-	"github.com/kotakanbe/goval-dictionary/db"
 	ovalmodels "github.com/kotakanbe/goval-dictionary/models"
 )
 
@@ -16,23 +16,34 @@ type SUSE struct {
 }
 
 // NewSUSE creates OVAL client for SUSE
-func NewSUSE() SUSE {
+func NewSUSE(cnf config.VulnDictInterface) SUSE {
 	// TODO implement other family
 	return SUSE{
 		Base{
-			family: config.SUSEEnterpriseServer,
+			family: constant.SUSEEnterpriseServer,
+			Cnf:    cnf,
 		},
 	}
 }
 
 // FillWithOval returns scan result after updating CVE info by OVAL
-func (o SUSE) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err error) {
+func (o SUSE) FillWithOval(r *models.ScanResult) (nCVEs int, err error) {
 	var relatedDefs ovalResult
-	if config.Conf.OvalDict.IsFetchViaHTTP() {
-		if relatedDefs, err = getDefsByPackNameViaHTTP(r); err != nil {
+	if o.Cnf.IsFetchViaHTTP() {
+		if relatedDefs, err = getDefsByPackNameViaHTTP(r, o.Cnf.GetURL()); err != nil {
 			return 0, err
 		}
 	} else {
+		driver, err := newOvalDB(o.Cnf, r.Family)
+		if err != nil {
+			return 0, err
+		}
+		defer func() {
+			if err := driver.CloseDB(); err != nil {
+				logging.Log.Errorf("Failed to close DB. err: %+v", err)
+			}
+		}()
+
 		if relatedDefs, err = getDefsByPackNameFromOvalDB(driver, r); err != nil {
 			return 0, err
 		}
@@ -55,7 +66,7 @@ func (o SUSE) update(r *models.ScanResult, defPacks defPacks) {
 	ovalContent.Type = models.NewCveContentType(o.family)
 	vinfo, ok := r.ScannedCves[defPacks.def.Title]
 	if !ok {
-		util.Log.Debugf("%s is newly detected by OVAL", defPacks.def.Title)
+		logging.Log.Debugf("%s is newly detected by OVAL", defPacks.def.Title)
 		vinfo = models.VulnInfo{
 			CveID:       defPacks.def.Title,
 			Confidences: models.Confidences{models.OvalMatch},
@@ -65,9 +76,9 @@ func (o SUSE) update(r *models.ScanResult, defPacks defPacks) {
 		cveContents := vinfo.CveContents
 		ctype := models.NewCveContentType(o.family)
 		if _, ok := vinfo.CveContents[ctype]; ok {
-			util.Log.Debugf("%s OVAL will be overwritten", defPacks.def.Title)
+			logging.Log.Debugf("%s OVAL will be overwritten", defPacks.def.Title)
 		} else {
-			util.Log.Debugf("%s is also detected by OVAL", defPacks.def.Title)
+			logging.Log.Debugf("%s is also detected by OVAL", defPacks.def.Title)
 			cveContents = models.CveContents{}
 		}
 		vinfo.Confidences.AppendIfMissing(models.OvalMatch)

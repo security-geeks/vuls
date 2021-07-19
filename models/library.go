@@ -6,9 +6,9 @@ import (
 	"github.com/aquasecurity/trivy-db/pkg/db"
 	trivyDBTypes "github.com/aquasecurity/trivy-db/pkg/types"
 	"github.com/aquasecurity/trivy/pkg/detector/library"
+	"github.com/future-architect/vuls/logging"
 
 	"github.com/aquasecurity/trivy/pkg/types"
-	"github.com/future-architect/vuls/util"
 	"golang.org/x/xerrors"
 	// "github.com/aquasecurity/go-dep-parser/pkg/types"
 )
@@ -40,13 +40,14 @@ func (lss LibraryScanners) Total() (total int) {
 
 // LibraryScanner has libraries information
 type LibraryScanner struct {
+	Type string
 	Path string
 	Libs []types.Library
 }
 
 // Scan : scan target library
 func (s LibraryScanner) Scan() ([]VulnInfo, error) {
-	scanner, err := library.DriverFactory{}.NewDriver(filepath.Base(string(s.Path)))
+	scanner, err := library.NewDriver(s.Type)
 	if err != nil {
 		return nil, xerrors.Errorf("Failed to new a library driver: %w", err)
 	}
@@ -71,7 +72,7 @@ func (s LibraryScanner) convertFanalToVuln(tvulns []types.DetectedVulnerability)
 	for _, tvuln := range tvulns {
 		vinfo, err := s.getVulnDetail(tvuln)
 		if err != nil {
-			util.Log.Debugf("failed to getVulnDetail. err: %s, tvuln: %#v", err, tvuln)
+			logging.Log.Debugf("failed to getVulnDetail. err: %+v, tvuln: %#v", err, tvuln)
 			continue
 		}
 		vulns = append(vulns, vinfo)
@@ -87,15 +88,13 @@ func (s LibraryScanner) getVulnDetail(tvuln types.DetectedVulnerability) (vinfo 
 
 	vinfo.CveID = tvuln.VulnerabilityID
 	vinfo.CveContents = getCveContents(tvuln.VulnerabilityID, vul)
-	if tvuln.FixedVersion != "" {
-		vinfo.LibraryFixedIns = []LibraryFixedIn{
-			{
-				Key:     s.GetLibraryKey(),
-				Name:    tvuln.PkgName,
-				FixedIn: tvuln.FixedVersion,
-				Path:    s.Path,
-			},
-		}
+	vinfo.LibraryFixedIns = []LibraryFixedIn{
+		{
+			Key:     s.GetLibraryKey(),
+			Name:    tvuln.PkgName,
+			FixedIn: tvuln.FixedVersion,
+			Path:    s.Path,
+		},
 	}
 	return vinfo, nil
 }
@@ -128,6 +127,7 @@ var LibraryMap = map[string]string{
 	"composer.lock":     "php",
 	"Pipfile.lock":      "python",
 	"poetry.lock":       "python",
+	"go.sum":            "gomod",
 }
 
 // GetLibraryKey returns target library key

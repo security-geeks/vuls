@@ -1,3 +1,5 @@
+// +build !scanner
+
 package gost
 
 import (
@@ -6,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
+	"github.com/future-architect/vuls/logging"
 	"github.com/future-architect/vuls/models"
 	"github.com/future-architect/vuls/util"
 	"github.com/parnurzeal/gorequest"
@@ -48,7 +51,7 @@ func getCvesViaHTTP(cveIDs []string, urlPrefix string) (
 				if err != nil {
 					errChan <- err
 				} else {
-					util.Log.Debugf("HTTP Request to %s", url)
+					logging.Log.Debugf("HTTP Request to %s", url)
 					httpGet(url, req, resChan, errChan)
 				}
 			}
@@ -82,7 +85,10 @@ type request struct {
 
 func getAllUnfixedCvesViaHTTP(r *models.ScanResult, urlPrefix string) (
 	responses []response, err error) {
+	return getCvesWithFixStateViaHTTP(r, urlPrefix, "unfixed-cves")
+}
 
+func getCvesWithFixStateViaHTTP(r *models.ScanResult, urlPrefix, fixState string) (responses []response, err error) {
 	nReq := len(r.Packages) + len(r.SrcPackages)
 	reqChan := make(chan request, nReq)
 	resChan := make(chan response, nReq)
@@ -117,12 +123,12 @@ func getAllUnfixedCvesViaHTTP(r *models.ScanResult, urlPrefix string) (
 				url, err := util.URLPathJoin(
 					urlPrefix,
 					req.packName,
-					"unfixed-cves",
+					fixState,
 				)
 				if err != nil {
 					errChan <- err
 				} else {
-					util.Log.Debugf("HTTP Request to %s", url)
+					logging.Log.Debugf("HTTP Request to %s", url)
 					httpGet(url, req, resChan, errChan)
 				}
 			}
@@ -160,12 +166,12 @@ func httpGet(url string, req request, resChan chan<- response, errChan chan<- er
 			if count == retryMax {
 				return nil
 			}
-			return xerrors.Errorf("HTTP GET error, url: %s, resp: %v, err: %s", url, resp, errs)
+			return xerrors.Errorf("HTTP GET error, url: %s, resp: %v, err: %+v", url, resp, errs)
 		}
 		return nil
 	}
 	notify := func(err error, t time.Duration) {
-		util.Log.Warnf("Failed to HTTP GET. retrying in %s seconds. err: %s", t, err)
+		logging.Log.Warnf("Failed to HTTP GET. retrying in %s seconds. err: %+v", t, err)
 	}
 	err := backoff.RetryNotify(f, backoff.NewExponentialBackOff(), notify)
 	if err != nil {

@@ -18,7 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/future-architect/vuls/config"
-	c "github.com/future-architect/vuls/config"
+	"github.com/future-architect/vuls/logging"
 	"github.com/future-architect/vuls/models"
 	"github.com/future-architect/vuls/util"
 	"golang.org/x/xerrors"
@@ -50,13 +50,13 @@ func (w Writer) Write(rs ...models.ScanResult) error {
 
 	ipv4s, ipv6s, err := util.IP()
 	if err != nil {
-		util.Log.Errorf("Failed to fetch scannedIPs. err: %+v", err)
+		logging.Log.Warnf("Failed to get scannedIPs. err: %+v", err)
 	}
 	hostname, _ := os.Hostname()
 
 	payload := payload{
-		GroupID:      c.Conf.Saas.GroupID,
-		Token:        c.Conf.Saas.Token,
+		GroupID:      config.Conf.Saas.GroupID,
+		Token:        config.Conf.Saas.Token,
 		ScannedBy:    hostname,
 		ScannedIPv4s: strings.Join(ipv4s, ", "),
 		ScannedIPv6s: strings.Join(ipv6s, ", "),
@@ -67,13 +67,14 @@ func (w Writer) Write(rs ...models.ScanResult) error {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Conf.Saas.URL, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.Conf.Saas.URL, bytes.NewBuffer(body))
 	defer cancel()
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	// TODO Don't use global variable
 	client, err := util.GetHTTPClient(config.Conf.HTTPProxy)
 	if err != nil {
 		return err
@@ -114,7 +115,7 @@ func (w Writer) Write(rs ...models.ScanResult) error {
 		if err != nil {
 			return xerrors.Errorf("Failed to Marshal to JSON: %w", err)
 		}
-		util.Log.Infof("Uploading... %s", r.FormatServerName())
+		logging.Log.Infof("Uploading... %s", r.FormatServerName())
 		s3Key := renameKeyName(r.ServerUUID, r.Container)
 		putObjectInput := &s3.PutObjectInput{
 			Bucket: aws.String(tempCredential.S3Bucket),
@@ -126,7 +127,7 @@ func (w Writer) Write(rs ...models.ScanResult) error {
 				tempCredential.S3Bucket, s3Key, err)
 		}
 	}
-	util.Log.Infof("done")
+	logging.Log.Infof("done")
 	return nil
 }
 

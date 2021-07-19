@@ -3,11 +3,12 @@ package models
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/future-architect/vuls/config"
+	"github.com/future-architect/vuls/logging"
 	exploitmodels "github.com/vulsio/go-exploitdb/models"
 )
 
@@ -24,6 +25,81 @@ func (v VulnInfos) Find(f func(VulnInfo) bool) VulnInfos {
 		}
 	}
 	return filtered
+}
+
+// FilterByCvssOver return scored vulnerabilities
+func (v VulnInfos) FilterByCvssOver(over float64) VulnInfos {
+	return v.Find(func(v VulnInfo) bool {
+		if over <= v.MaxCvssScore().Value.Score {
+			return true
+		}
+		return false
+	})
+}
+
+// FilterIgnoreCves filter function.
+func (v VulnInfos) FilterIgnoreCves(ignoreCveIDs []string) VulnInfos {
+	return v.Find(func(v VulnInfo) bool {
+		for _, c := range ignoreCveIDs {
+			if v.CveID == c {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// FilterUnfixed filter unfixed CVE-IDs
+func (v VulnInfos) FilterUnfixed(ignoreUnfixed bool) VulnInfos {
+	if !ignoreUnfixed {
+		return v
+	}
+	return v.Find(func(v VulnInfo) bool {
+		// Report cves detected by CPE because Vuls can't know 'fixed' or 'unfixed'
+		if len(v.CpeURIs) != 0 {
+			return true
+		}
+		NotFixedAll := true
+		for _, p := range v.AffectedPackages {
+			NotFixedAll = NotFixedAll && p.NotFixedYet
+		}
+		return !NotFixedAll
+	})
+}
+
+// FilterIgnorePkgs is filter function.
+func (v VulnInfos) FilterIgnorePkgs(ignorePkgsRegexps []string) VulnInfos {
+	regexps := []*regexp.Regexp{}
+	for _, pkgRegexp := range ignorePkgsRegexps {
+		re, err := regexp.Compile(pkgRegexp)
+		if err != nil {
+			logging.Log.Warnf("Failed to parse %s. err: %+v", pkgRegexp, err)
+			continue
+		} else {
+			regexps = append(regexps, re)
+		}
+	}
+	if len(regexps) == 0 {
+		return v
+	}
+
+	return v.Find(func(v VulnInfo) bool {
+		if len(v.AffectedPackages) == 0 {
+			return true
+		}
+		for _, p := range v.AffectedPackages {
+			match := false
+			for _, re := range regexps {
+				if re.MatchString(p.Name) {
+					match = true
+				}
+			}
+			if !match {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // FindScoredVulns return scored vulnerabilities
@@ -78,19 +154,14 @@ func (v VulnInfos) CountGroupBySeverity() map[string]int {
 }
 
 // FormatCveSummary summarize the number of CVEs group by CVSSv2 Severity
-func (v VulnInfos) FormatCveSummary() (line string) {
+func (v VulnInfos) FormatCveSummary() string {
 	m := v.CountGroupBySeverity()
-	if config.Conf.IgnoreUnscoredCves {
-		line = fmt.Sprintf("Total: %d (Critical:%d High:%d Medium:%d Low:%d)",
-			m["High"]+m["Medium"]+m["Low"], m["Critical"], m["High"], m["Medium"], m["Low"])
-	} else {
-		line = fmt.Sprintf("Total: %d (Critical:%d High:%d Medium:%d Low:%d ?:%d)",
-			m["High"]+m["Medium"]+m["Low"]+m["Unknown"],
-			m["Critical"], m["High"], m["Medium"], m["Low"], m["Unknown"])
-	}
+	line := fmt.Sprintf("Total: %d (Critical:%d High:%d Medium:%d Low:%d ?:%d)",
+		m["Critical"]+m["High"]+m["Medium"]+m["Low"]+m["Unknown"],
+		m["Critical"], m["High"], m["Medium"], m["Low"], m["Unknown"])
 
-	if config.Conf.DiffMinus || config.Conf.DiffPlus {
-		nPlus, nMinus := v.CountDiff()
+	nPlus, nMinus := v.CountDiff()
+	if 0 < nPlus || 0 < nMinus {
 		line = fmt.Sprintf("%s +%d -%d", line, nPlus, nMinus)
 	}
 	return line
@@ -266,8 +337,8 @@ const (
 )
 
 // CveIDDiffFormat format CVE-ID for diff mode
-func (v VulnInfo) CveIDDiffFormat(isDiffMode bool) string {
-	if isDiffMode {
+func (v VulnInfo) CveIDDiffFormat() string {
+	if v.DiffStatus != "" {
 		return fmt.Sprintf("%s %s", v.DiffStatus, v.CveID)
 	}
 	return fmt.Sprintf("%s", v.CveID)
@@ -692,14 +763,10 @@ type AlertDict struct {
 
 // FormatSource returns which source has this alert
 func (a AlertDict) FormatSource() string {
-	s := []string{}
-	if len(a.En) != 0 {
-		s = append(s, "USCERT")
+	if len(a.En) != 0 || len(a.Ja) != 0 {
+		return "CERT"
 	}
-	if len(a.Ja) != 0 {
-		s = append(s, "JPCERT")
-	}
-	return strings.Join(s, "/")
+	return ""
 }
 
 // Confidences is a list of Confidence
@@ -741,8 +808,11 @@ func (c Confidence) String() string {
 type DetectionMethod string
 
 const (
-	// CpeNameMatchStr is a String representation of CpeNameMatch
-	CpeNameMatchStr = "CpeNameMatch"
+	// CpeVersionMatchStr is a String representation of CpeNameMatch
+	CpeVersionMatchStr = "CpeVersionMatch"
+
+	// CpeVendorProductMatchStr is a String representation of CpeNameMatch
+	CpeVendorProductMatchStr = "CpeVendorProductMatch"
 
 	// YumUpdateSecurityMatchStr is a String representation of YumUpdateSecurityMatch
 	YumUpdateSecurityMatchStr = "YumUpdateSecurityMatch"
@@ -758,6 +828,9 @@ const (
 
 	// DebianSecurityTrackerMatchStr is a String representation of DebianSecurityTrackerMatch
 	DebianSecurityTrackerMatchStr = "DebianSecurityTrackerMatch"
+
+	// UbuntuAPIMatchStr is a String representation of UbuntuAPIMatch
+	UbuntuAPIMatchStr = "UbuntuAPIMatch"
 
 	// TrivyMatchStr is a String representation of Trivy
 	TrivyMatchStr = "TrivyMatch"
@@ -782,8 +855,8 @@ const (
 )
 
 var (
-	// CpeNameMatch is a ranking how confident the CVE-ID was detected correctly
-	CpeNameMatch = Confidence{100, CpeNameMatchStr, 1}
+	// CpeVersionMatch is a ranking how confident the CVE-ID was detected correctly
+	CpeVersionMatch = Confidence{100, CpeVersionMatchStr, 1}
 
 	// YumUpdateSecurityMatch is a ranking how confident the CVE-ID was detected correctly
 	YumUpdateSecurityMatch = Confidence{100, YumUpdateSecurityMatchStr, 2}
@@ -800,6 +873,9 @@ var (
 	// DebianSecurityTrackerMatch ranking how confident the CVE-ID was detected correctly
 	DebianSecurityTrackerMatch = Confidence{100, DebianSecurityTrackerMatchStr, 0}
 
+	// UbuntuAPIMatch ranking how confident the CVE-ID was detected correctly
+	UbuntuAPIMatch = Confidence{100, UbuntuAPIMatchStr, 0}
+
 	// TrivyMatch ranking how confident the CVE-ID was detected correctly
 	TrivyMatch = Confidence{100, TrivyMatchStr, 0}
 
@@ -814,4 +890,7 @@ var (
 
 	// WpScanMatch is a ranking how confident the CVE-ID was detected correctly
 	WpScanMatch = Confidence{100, WpScanMatchStr, 0}
+
+	// CpeVendorProductMatch is a ranking how confident the CVE-ID was detected correctly
+	CpeVendorProductMatch = Confidence{10, CpeVendorProductMatchStr, 9}
 )

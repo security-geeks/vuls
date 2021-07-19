@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/subcommands"
 
-	c "github.com/future-architect/vuls/config"
-	"github.com/future-architect/vuls/scan"
-	"github.com/future-architect/vuls/util"
+	"github.com/future-architect/vuls/config"
+	"github.com/future-architect/vuls/logging"
+	"github.com/future-architect/vuls/scanner"
 )
 
 // ConfigtestCmd is Subcommand
@@ -33,6 +33,7 @@ func (*ConfigtestCmd) Usage() string {
 	return `configtest:
 	configtest
 			[-config=/path/to/config.toml]
+			[-log-to-file]
 			[-log-dir=/path/to/log]
 			[-ask-key-password]
 			[-timeout=300]
@@ -51,9 +52,10 @@ func (p *ConfigtestCmd) SetFlags(f *flag.FlagSet) {
 	defaultConfPath := filepath.Join(wd, "config.toml")
 	f.StringVar(&p.configPath, "config", defaultConfPath, "/path/to/toml")
 
-	defaultLogDir := util.GetDefaultLogDir()
-	f.StringVar(&c.Conf.LogDir, "log-dir", defaultLogDir, "/path/to/log")
-	f.BoolVar(&c.Conf.Debug, "debug", false, "debug mode")
+	defaultLogDir := logging.GetDefaultLogDir()
+	f.StringVar(&config.Conf.LogDir, "log-dir", defaultLogDir, "/path/to/log")
+	f.BoolVar(&config.Conf.LogToFile, "log-to-file", false, "output log to file")
+	f.BoolVar(&config.Conf.Debug, "debug", false, "debug mode")
 
 	f.IntVar(&p.timeoutSec, "timeout", 5*60, "Timeout(Sec)")
 
@@ -61,21 +63,19 @@ func (p *ConfigtestCmd) SetFlags(f *flag.FlagSet) {
 		"Ask ssh privatekey password before scanning",
 	)
 
-	f.StringVar(&c.Conf.HTTPProxy, "http-proxy", "",
+	f.StringVar(&config.Conf.HTTPProxy, "http-proxy", "",
 		"http://proxy-url:port (default: empty)")
 
-	f.BoolVar(&c.Conf.SSHNative, "ssh-native-insecure", false,
-		"Use Native Go implementation of SSH. Default: Use the external command")
-
-	f.BoolVar(&c.Conf.Vvv, "vvv", false, "ssh -vvv")
+	f.BoolVar(&config.Conf.Vvv, "vvv", false, "ssh -vvv")
 }
 
 // Execute execute
 func (p *ConfigtestCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	util.Log = util.NewCustomLogger(c.ServerInfo{})
+	logging.Log = logging.NewCustomLogger(config.Conf.Debug, config.Conf.Quiet, config.Conf.LogToFile, config.Conf.LogDir, "", "")
+	logging.Log.Infof("vuls-%s-%s", config.Version, config.Revision)
 
 	if err := mkdirDotVuls(); err != nil {
-		util.Log.Errorf("Failed to create .vuls. err: %+v", err)
+		logging.Log.Errorf("Failed to create $HOME/.vuls: %+v", err)
 		return subcommands.ExitUsageError
 	}
 
@@ -84,19 +84,19 @@ func (p *ConfigtestCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interfa
 	if p.askKeyPassword {
 		prompt := "SSH key password: "
 		if keyPass, err = getPasswd(prompt); err != nil {
-			util.Log.Error(err)
+			logging.Log.Error(err)
 			return subcommands.ExitFailure
 		}
 	}
 
-	err = c.Load(p.configPath, keyPass)
+	err = config.Load(p.configPath, keyPass)
 	if err != nil {
 		msg := []string{
 			fmt.Sprintf("Error loading %s", p.configPath),
 			"If you update Vuls and get this error, there may be incompatible changes in config.toml",
 			"Please check config.toml template : https://vuls.io/docs/en/usage-settings.html",
 		}
-		util.Log.Errorf("%s\n%+v", strings.Join(msg, "\n"), err)
+		logging.Log.Errorf("%s\n%+v", strings.Join(msg, "\n"), err)
 		return subcommands.ExitUsageError
 	}
 
@@ -105,52 +105,43 @@ func (p *ConfigtestCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interfa
 		servernames = f.Args()
 	}
 
-	target := make(map[string]c.ServerInfo)
+	targets := make(map[string]config.ServerInfo)
 	for _, arg := range servernames {
 		found := false
-		for servername, info := range c.Conf.Servers {
+		for servername, info := range config.Conf.Servers {
 			if servername == arg {
-				target[servername] = info
+				targets[servername] = info
 				found = true
 				break
 			}
 		}
 		if !found {
-			util.Log.Errorf("%s is not in config", arg)
+			logging.Log.Errorf("%s is not in config", arg)
 			return subcommands.ExitUsageError
 		}
 	}
 	if 0 < len(servernames) {
-		c.Conf.Servers = target
+		// if scan target servers are specified by args, set to the config
+		config.Conf.Servers = targets
+	} else {
+		// if not specified by args, scan all servers in the config
+		targets = config.Conf.Servers
 	}
 
-	util.Log.Info("Validating config...")
-	if !c.Conf.ValidateOnConfigtest() {
+	logging.Log.Info("Validating config...")
+	if !config.Conf.ValidateOnConfigtest() {
 		return subcommands.ExitUsageError
 	}
 
-	util.Log.Info("Detecting Server/Container OS... ")
-	if err := scan.InitServers(p.timeoutSec); err != nil {
-		util.Log.Errorf("Failed to init servers. err: %+v", err)
+	s := scanner.Scanner{
+		TimeoutSec: p.timeoutSec,
+		Targets:    targets,
+	}
+
+	if err := s.Configtest(); err != nil {
+		logging.Log.Errorf("Failed to configtest: %+v", err)
 		return subcommands.ExitFailure
 	}
 
-	util.Log.Info("Checking Scan Modes...")
-	if err := scan.CheckScanModes(); err != nil {
-		util.Log.Errorf("Fix config.toml. err: %+v", err)
-		return subcommands.ExitFailure
-	}
-
-	util.Log.Info("Checking dependencies...")
-	scan.CheckDependencies(p.timeoutSec)
-
-	util.Log.Info("Checking sudo settings...")
-	scan.CheckIfSudoNoPasswd(p.timeoutSec)
-
-	util.Log.Info("It can be scanned with fast scan mode even if warn or err messages are displayed due to lack of dependent packages or sudo settings in fast-root or deep scan mode")
-
-	if scan.PrintSSHableServerNames() {
-		return subcommands.ExitSuccess
-	}
-	return subcommands.ExitFailure
+	return subcommands.ExitSuccess
 }

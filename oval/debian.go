@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"github.com/future-architect/vuls/config"
+	"github.com/future-architect/vuls/constant"
+	"github.com/future-architect/vuls/logging"
 	"github.com/future-architect/vuls/models"
 	"github.com/future-architect/vuls/util"
-	"github.com/kotakanbe/goval-dictionary/db"
 	ovalmodels "github.com/kotakanbe/goval-dictionary/models"
 )
 
@@ -23,7 +24,7 @@ func (o DebianBase) update(r *models.ScanResult, defPacks defPacks) {
 	ovalContent.Type = models.NewCveContentType(o.family)
 	vinfo, ok := r.ScannedCves[defPacks.def.Debian.CveID]
 	if !ok {
-		util.Log.Debugf("%s is newly detected by OVAL", defPacks.def.Debian.CveID)
+		logging.Log.Debugf("%s is newly detected by OVAL", defPacks.def.Debian.CveID)
 		vinfo = models.VulnInfo{
 			CveID:       defPacks.def.Debian.CveID,
 			Confidences: []models.Confidence{models.OvalMatch},
@@ -33,14 +34,14 @@ func (o DebianBase) update(r *models.ScanResult, defPacks defPacks) {
 		cveContents := vinfo.CveContents
 		ctype := models.NewCveContentType(o.family)
 		if _, ok := vinfo.CveContents[ctype]; ok {
-			util.Log.Debugf("%s OVAL will be overwritten",
+			logging.Log.Debugf("%s OVAL will be overwritten",
 				defPacks.def.Debian.CveID)
 		} else {
-			util.Log.Debugf("%s is also detected by OVAL",
+			logging.Log.Debugf("%s is also detected by OVAL",
 				defPacks.def.Debian.CveID)
 			cveContents = models.CveContents{}
 		}
-		if r.Family != config.Raspbian {
+		if r.Family != constant.Raspbian {
 			vinfo.Confidences.AppendIfMissing(models.OvalMatch)
 		} else {
 			if len(vinfo.Confidences) == 0 {
@@ -109,18 +110,19 @@ type Debian struct {
 }
 
 // NewDebian creates OVAL client for Debian
-func NewDebian() Debian {
+func NewDebian(cnf config.VulnDictInterface) Debian {
 	return Debian{
 		DebianBase{
 			Base{
-				family: config.Debian,
+				family: constant.Debian,
+				Cnf:    cnf,
 			},
 		},
 	}
 }
 
 // FillWithOval returns scan result after updating CVE info by OVAL
-func (o Debian) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err error) {
+func (o Debian) FillWithOval(r *models.ScanResult) (nCVEs int, err error) {
 
 	//Debian's uname gives both of kernel release(uname -r), version(kernel-image version)
 	linuxImage := "linux-image-" + r.RunningKernel.Release
@@ -139,29 +141,23 @@ func (o Debian) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err
 	}
 
 	var relatedDefs ovalResult
-	if config.Conf.OvalDict.IsFetchViaHTTP() {
-		if r.Family != config.Raspbian {
-			if relatedDefs, err = getDefsByPackNameViaHTTP(r); err != nil {
-				return 0, err
-			}
-		} else {
-			// OVAL does not support Package for Raspbian, so skip it.
-			result := r.RemoveRaspbianPackFromResult()
-			if relatedDefs, err = getDefsByPackNameViaHTTP(&result); err != nil {
-				return 0, err
-			}
+	if o.Cnf.IsFetchViaHTTP() {
+		if relatedDefs, err = getDefsByPackNameViaHTTP(r, o.Cnf.GetURL()); err != nil {
+			return 0, err
 		}
 	} else {
-		if r.Family != config.Raspbian {
-			if relatedDefs, err = getDefsByPackNameFromOvalDB(driver, r); err != nil {
-				return 0, err
+		driver, err := newOvalDB(o.Cnf, r.Family)
+		if err != nil {
+			return 0, err
+		}
+		defer func() {
+			if err := driver.CloseDB(); err != nil {
+				logging.Log.Errorf("Failed to close DB. err: %+v", err)
 			}
-		} else {
-			// OVAL does not support Package for Raspbian, so skip it.
-			result := r.RemoveRaspbianPackFromResult()
-			if relatedDefs, err = getDefsByPackNameFromOvalDB(driver, &result); err != nil {
-				return 0, err
-			}
+		}()
+
+		if relatedDefs, err = getDefsByPackNameFromOvalDB(driver, r); err != nil {
+			return 0, err
 		}
 	}
 
@@ -199,18 +195,19 @@ type Ubuntu struct {
 }
 
 // NewUbuntu creates OVAL client for Debian
-func NewUbuntu() Ubuntu {
+func NewUbuntu(cnf config.VulnDictInterface) Ubuntu {
 	return Ubuntu{
 		DebianBase{
 			Base{
-				family: config.Ubuntu,
+				family: constant.Ubuntu,
+				Cnf:    cnf,
 			},
 		},
 	}
 }
 
 // FillWithOval returns scan result after updating CVE info by OVAL
-func (o Ubuntu) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err error) {
+func (o Ubuntu) FillWithOval(r *models.ScanResult) (nCVEs int, err error) {
 	switch util.Major(r.Release) {
 	case "14":
 		kernelNamesInOval := []string{
@@ -226,7 +223,7 @@ func (o Ubuntu) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err
 			"linux-signed-lts-xenial",
 			"linux",
 		}
-		return o.fillWithOval(driver, r, kernelNamesInOval)
+		return o.fillWithOval(r, kernelNamesInOval)
 	case "16":
 		kernelNamesInOval := []string{
 			"linux-aws",
@@ -261,7 +258,7 @@ func (o Ubuntu) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err
 			"linux-snapdragon",
 			"linux",
 		}
-		return o.fillWithOval(driver, r, kernelNamesInOval)
+		return o.fillWithOval(r, kernelNamesInOval)
 	case "18":
 		kernelNamesInOval := []string{
 			"linux-aws",
@@ -316,7 +313,7 @@ func (o Ubuntu) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err
 			"linux-snapdragon",
 			"linux",
 		}
-		return o.fillWithOval(driver, r, kernelNamesInOval)
+		return o.fillWithOval(r, kernelNamesInOval)
 	case "20":
 		kernelNamesInOval := []string{
 			"linux-aws",
@@ -344,12 +341,53 @@ func (o Ubuntu) FillWithOval(driver db.DB, r *models.ScanResult) (nCVEs int, err
 			"linux-signed-oracle",
 			"linux",
 		}
-		return o.fillWithOval(driver, r, kernelNamesInOval)
+		return o.fillWithOval(r, kernelNamesInOval)
+	case "21":
+		kernelNamesInOval := []string{
+			"linux-aws",
+			"linux-base-sgx",
+			"linux-base",
+			"linux-cloud-tools-common",
+			"linux-cloud-tools-generic",
+			"linux-cloud-tools-lowlatency",
+			"linux-cloud-tools-virtual",
+			"linux-gcp",
+			"linux-generic",
+			"linux-gke",
+			"linux-headers-aws",
+			"linux-headers-gcp",
+			"linux-headers-gke",
+			"linux-headers-oracle",
+			"linux-image-aws",
+			"linux-image-extra-virtual",
+			"linux-image-gcp",
+			"linux-image-generic",
+			"linux-image-gke",
+			"linux-image-lowlatency",
+			"linux-image-oracle",
+			"linux-image-virtual",
+			"linux-lowlatency",
+			"linux-modules-extra-aws",
+			"linux-modules-extra-gcp",
+			"linux-modules-extra-gke",
+			"linux-oracle",
+			"linux-tools-aws",
+			"linux-tools-common",
+			"linux-tools-gcp",
+			"linux-tools-generic",
+			"linux-tools-gke",
+			"linux-tools-host",
+			"linux-tools-lowlatency",
+			"linux-tools-oracle",
+			"linux-tools-virtual",
+			"linux-virtual",
+		}
+		return o.fillWithOval(r, kernelNamesInOval)
 	}
 	return 0, fmt.Errorf("Ubuntu %s is not support for now", r.Release)
 }
 
-func (o Ubuntu) fillWithOval(driver db.DB, r *models.ScanResult, kernelNamesInOval []string) (nCVEs int, err error) {
+func (o Ubuntu) fillWithOval(r *models.ScanResult, kernelNamesInOval []string) (nCVEs int, err error) {
 	linuxImage := "linux-image-" + r.RunningKernel.Release
 	runningKernelVersion := ""
 	kernelPkgInOVAL := ""
@@ -361,7 +399,7 @@ func (o Ubuntu) fillWithOval(driver db.DB, r *models.ScanResult, kernelNamesInOv
 		if v, ok := r.Packages[linuxImage]; ok {
 			runningKernelVersion = v.Version
 		} else {
-			util.Log.Warnf("Unable to detect vulns of running kernel because the version of the running kernel is unknown. server: %s",
+			logging.Log.Warnf("Unable to detect vulns of running kernel because the version of the running kernel is unknown. server: %s",
 				r.ServerName)
 		}
 
@@ -400,7 +438,7 @@ func (o Ubuntu) fillWithOval(driver db.DB, r *models.ScanResult, kernelNamesInOv
 		}
 
 		if kernelPkgInOVAL == "" {
-			util.Log.Warnf("The OVAL name of the running kernel image %+v is not found. So vulns of `linux` wll be detected. server: %s",
+			logging.Log.Warnf("The OVAL name of the running kernel image %+v is not found. So vulns of `linux` wll be detected. server: %s",
 				r.RunningKernel, r.ServerName)
 			kernelPkgInOVAL = "linux"
 			isOVALKernelPkgAdded = true
@@ -415,11 +453,21 @@ func (o Ubuntu) fillWithOval(driver db.DB, r *models.ScanResult, kernelNamesInOv
 	}
 
 	var relatedDefs ovalResult
-	if config.Conf.OvalDict.IsFetchViaHTTP() {
-		if relatedDefs, err = getDefsByPackNameViaHTTP(r); err != nil {
+	if o.Cnf.IsFetchViaHTTP() {
+		if relatedDefs, err = getDefsByPackNameViaHTTP(r, o.Cnf.GetURL()); err != nil {
 			return 0, err
 		}
 	} else {
+		driver, err := newOvalDB(o.Cnf, r.Family)
+		if err != nil {
+			return 0, err
+		}
+		defer func() {
+			if err := driver.CloseDB(); err != nil {
+				logging.Log.Errorf("Failed to close DB. err: %+v", err)
+			}
+		}()
+
 		if relatedDefs, err = getDefsByPackNameFromOvalDB(driver, r); err != nil {
 			return 0, err
 		}
